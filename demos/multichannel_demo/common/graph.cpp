@@ -10,6 +10,7 @@
 
 #include "graph.hpp"
 #include "threading.hpp"
+#include <cldnn/cldnn_config.hpp>
 
 #ifdef USE_TBB
 #include <tbb/parallel_for.h>
@@ -37,7 +38,7 @@ void loadImgToIEGraph(const cv::Mat& img, size_t batch, void* ieBuffer) {
 
 }  // namespace
 
-void IEGraph::initNetwork(const std::string& deviceName) {
+void IEGraph::initNetwork(const std::string& deviceName, bool enableThroughput, const std::string& nstreams, const std::string& nthreads) {
     InferenceEngine::CNNNetReader  netReader;
 
     netReader.ReadNetwork(modelPath);
@@ -49,7 +50,20 @@ void IEGraph::initNetwork(const std::string& deviceName) {
 
     if (deviceName.find("CPU") != std::string::npos) {
         ie.AddExtension(std::make_shared<InferenceEngine::Extensions::Cpu::CpuExtensions>(), "CPU");
-        ie.SetConfig({{InferenceEngine::PluginConfigParams::KEY_CPU_BIND_THREAD, "NO"}}, "CPU");
+        ie.SetConfig({{ CONFIG_KEY(CPU_THREADS_NUM), nthreads }}, "CPU");
+        ie.SetConfig({{ CONFIG_KEY(CPU_BIND_THREAD), CONFIG_VALUE(NO) }}, "CPU");
+        ie.SetConfig({{ CONFIG_KEY(CPU_THROUGHPUT_STREAMS), nstreams }}, "CPU");
+    }
+    if (deviceName.find("GPU") != std::string::npos) {
+        if (maxRequests > 1)
+            ie.SetConfig({{ CONFIG_KEY(GPU_THROUGHPUT_STREAMS), "GPU_THROUGHPUT_AUTO" }}, "GPU");
+        else ie.SetConfig({{ CONFIG_KEY(GPU_THROUGHPUT_STREAMS), "1" }}, "GPU");
+        if ((deviceName.find("MULTI") != std::string::npos) &&
+            (deviceName.find("CPU") != std::string::npos)) {
+                // multi-device execution with the CPU + GPU performs best with GPU trottling hint,
+                // which releases another CPU thread (that is otherwise used by the GPU driver for active polling)
+                ie.SetConfig({{ CLDNN_CONFIG_KEY(PLUGIN_THROTTLE), "1" }}, "GPU");
+        }
     }
     if (!cpuExtensionPath.empty()) {
         auto extension_ptr = InferenceEngine::make_so_pointer<InferenceEngine::IExtension>(cpuExtensionPath);
@@ -199,7 +213,7 @@ IEGraph::IEGraph(const InitParams& p):
     maxRequests(p.maxRequests) {
     assert(p.maxRequests > 0);
 
-    initNetwork(p.deviceName);
+    initNetwork(p.deviceName, p.enableThroughput, p.nstreams, p.nthreads);
 }
 
 InferenceEngine::SizeVector IEGraph::getInputDims() const {

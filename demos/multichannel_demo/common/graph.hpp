@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2019 Intel Corporation
+// Copyright (C) 2018 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -77,7 +77,7 @@ private:
     PostprocessingFunc postprocessing;
     std::thread getterThread;
 
-    void initNetwork(const std::string& deviceName);
+    void initNetwork(const std::string& deviceName, bool enableThroughput, const std::string&, const std::string&);
 
 public:
     struct InitParams {
@@ -90,6 +90,8 @@ public:
         std::string cpuExtPath;
         std::string cldnnConfigPath;
         std::string deviceName;
+        bool enableThroughput = false;
+        std::string nstreams, nthreads;
     };
 
     explicit IEGraph(const InitParams& p);
@@ -115,4 +117,3 @@ public:
 
     void printPerformanceCounts(std::string fullDeviceName);
 };
-

@@ -127,3 +127,10 @@ DEFINE_bool(real_input_fps, false, real_input_fps);
 /// \brief Define parameter for input video files <br>
 /// It is a optional parameter
 DEFINE_string(i, "", input_video);
+
+/// \brief Define name for output window <br>
+/// It is a optional parameter
+DEFINE_string(title, "output", "Window Title");
+
+DEFINE_string(nstreams, "4", "CPU streams");
+DEFINE_string(nthreads, "8", "CPU streams");

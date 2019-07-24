@@ -50,12 +50,18 @@ void AsyncOutput::start() {
 
             if (perfTimer.enabled()) {
                 ScopedTimer sc(perfTimer);
-                if (!drawFunc(elem)) {
+
+                int res = drawFunc(elem);
+
+                if (27 == res || ' ' == res) {
                     terminate = true;
+                    pressedKey = res;
                 }
             } else {
-                if (!drawFunc(elem)) {
+                int res = drawFunc(elem);
+                if (27 == res || ' ' == res) {
                     terminate = true;
+                    pressedKey = res;
                 }
             }
         }

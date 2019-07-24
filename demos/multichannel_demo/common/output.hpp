@@ -18,7 +18,7 @@
 
 class AsyncOutput{
 public:
-    using DrawFunc = std::function<bool(const std::vector<std::shared_ptr<VideoFrame>>&)>;
+    using DrawFunc = std::function<int(const std::vector<std::shared_ptr<VideoFrame>>&)>;
 
     AsyncOutput(bool collectStats, size_t queueSize, DrawFunc drawFunc);
     ~AsyncOutput();
@@ -29,6 +29,8 @@ public:
         float renderTime;
     };
     Stats getStats() const;
+
+    int pressedKey = -1;
 
 private:
     const size_t queueSize;

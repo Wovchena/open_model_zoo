@@ -443,20 +443,21 @@ bool isNumeric(const std::string& str) {
 bool VideoSourceOCV::init() {
     static std::mutex initMutex;  // HACK: opencv camera init is not thread-safe
     std::unique_lock<std::mutex> lock(initMutex);
-    bool res = false;
     if (isNumeric(videoName)) {
+    bool res = false;
 #ifdef __linux__
         res = source.open("/dev/video" + videoName);
 #else
         res = source.open(std::stoi(videoName));
 #endif
-    } else {
-        res = source.open(videoName);
-    }
     if (res) {
         source.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'));
     }
+        std::cout << source.get(cv::CAP_PROP_FPS) << "FPS, " << source.get(cv::CAP_PROP_FRAME_WIDTH) << 'x' << source.get(cv::CAP_PROP_FRAME_HEIGHT) << "\n";
     return res;
+    } else {
+        return source.open(videoName);
+    }
 }
 
 template<bool CollectStats>

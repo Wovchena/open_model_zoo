@@ -20,6 +20,8 @@
 #include <sstream>
 #include <memory>
 #include <string>
+#include <fstream>
+#include <regex>
 
 #ifdef USE_TBB
 #include <tbb/parallel_for.h>
@@ -67,6 +69,9 @@ void showUsage() {
     std::cout << "    -duplicate_num               " << duplication_channel_number << std::endl;
     std::cout << "    -real_input_fps              " << real_input_fps << std::endl;
     std::cout << "    -i                           " << input_video << std::endl;
+    std::cout << "    -width                       " << image_width << std::endl;
+    std::cout << "    -height                      " << image_height << std::endl;
+    std::cout << "    -throughput                  " << enable_throughput << std::endl;
 }
 
 bool ParseAndCheckCommandLine(int argc, char *argv[]) {
@@ -117,8 +122,8 @@ void drawDetections(cv::Mat& img, const std::vector<Face> detections) {
     }
 }
 
-const size_t DISP_WIDTH  = 1920;
-const size_t DISP_HEIGHT = 1080;
+const size_t DISP_WIDTH  = FLAGS_width;
+const size_t DISP_HEIGHT = FLAGS_height;
 const size_t MAX_INPUTS  = 25;
 
 struct DisplayParams {
@@ -133,6 +138,7 @@ DisplayParams prepareDisplayParams(size_t count) {
     DisplayParams params;
     params.count = count;
     params.windowSize = cv::Size(DISP_WIDTH, DISP_HEIGHT);
+    params.name = FLAGS_title;
 
     size_t gridCount = static_cast<size_t>(ceil(sqrt(count)));
     size_t gridStepX = static_cast<size_t>(DISP_WIDTH/gridCount);
@@ -193,16 +199,68 @@ void displayNSources(const std::vector<std::shared_ptr<VideoFrame>>& data,
     }
 #endif
     drawStats();
-
+    if (0 != time) {
     char str[256];
-    snprintf(str, sizeof(str), "%5.2f fps", static_cast<double>(1000.0f/time));
-    cv::putText(windowImage, str, cv::Point(800, 100), cv::HersheyFonts::FONT_HERSHEY_COMPLEX, 2.0,  cv::Scalar(0, 255, 0), 2);
+        double fps = static_cast<double>(1000.0f/time);
+        snprintf(str, sizeof(str), "%s: %5.2f fps", FLAGS_title.c_str(), fps);
+        cv::putText(windowImage, str, cv::Point(50, 100), cv::HersheyFonts::FONT_HERSHEY_COMPLEX, 1.5,  cv::Scalar(0, 255, 0), 2);
+    } else {
+       cv::putText(windowImage, FLAGS_title.c_str(), cv::Point(50, 100), cv::HersheyFonts::FONT_HERSHEY_COMPLEX, 1.5, cv::Scalar(0, 255, 0), 2); 
+    }
     cv::imshow(params.name, windowImage);
+}
+
+std::pair<std::vector<unsigned long>, std::vector<unsigned long>> getCpuStat() {  // returns (idle, total)
+    static unsigned ncpu = 0;
+    if (0 == ncpu) {
+        std::ifstream cpuinfo("/proc/cpuinfo");
+        ncpu = std::count(std::istream_iterator<std::string>(cpuinfo),
+                          std::istream_iterator<std::string>(),
+                          std::string("processor"));
+    }
+    std::vector<unsigned long> idle(ncpu), total(ncpu);
+    std::ifstream proc_stat("/proc/stat");
+    while(true)
+    {
+        std::string line;
+        std::getline(proc_stat, line);
+        if (!proc_stat.good())
+        {
+            break;
+        }
+
+        std::regex      core_jiffies("^cpu(\\d+)\\s+"   "(\\d+)\\s+" // user
+                                                   "(\\d+)\\s+" // nice
+                                                   "(\\d+)\\s+" // system
+                                                   "(\\d+)\\s+" // idle
+                                                   "(\\d+)\\s+" // iowait
+                                                   "(\\d+)\\s+" // irq
+                                                   "(\\d+)\\s+" // softirq
+                                                   "(\\d+)\\s+" // steal
+                                                   "(\\d+)\\s+" // guest
+                                                   "(\\d+)$");  // guest_nice
+        std::smatch     match;
+
+        if ( std::regex_match(line, match, core_jiffies) )
+        {
+
+            auto        idleInfo =      stoul(match[5]) + stoul(match[6]),
+                        non_idleinfo =  stoul(match[2]) + stoul(match[3]) +
+                                    stoul(match[4]) + stoul(match[7]) +
+                                    stoul(match[8]) + stoul(match[9]),
+                        core_id =   stoul(match[1]);
+
+            idle[core_id] = idleInfo;
+            total[core_id] = idleInfo + non_idleinfo;
+        }
+    }
+    return {idle, total};
 }
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
+	int res = 0;
     try {
 #if USE_TBB
         TbbArenaWrapper arena;
@@ -236,6 +294,9 @@ int main(int argc, char* argv[]) {
         graphParams.cpuExtPath      = FLAGS_l;
         graphParams.cldnnConfigPath = FLAGS_c;
         graphParams.deviceName      = FLAGS_d;
+        graphParams.enableThroughput = FLAGS_throughput;
+        graphParams.nstreams = FLAGS_nstreams;
+        graphParams.nthreads = FLAGS_nthreads;
 
         std::shared_ptr<IEGraph> network(new IEGraph(graphParams));
         auto inputDims = network->getInputDims();
@@ -340,12 +401,6 @@ int main(int argc, char* argv[]) {
         std::mutex statMutex;
         std::stringstream statStream;
 
-        std::cout << "To close the application, press 'CTRL+C' here";
-        if (!FLAGS_no_show) {
-            std::cout << " or switch to the output window and press ESC key";
-        }
-        std::cout << std::endl;
-
         const size_t outputQueueSize = 1;
         AsyncOutput output(FLAGS_show_stats, outputQueueSize,
         [&](const std::vector<std::shared_ptr<VideoFrame>>& result) {
@@ -356,7 +411,7 @@ int main(int argc, char* argv[]) {
             }
             displayNSources(result, averageFps, str, params);
 
-            return (cv::waitKey(1) != 27);
+            return cv::waitKey(1);
         });
 
         output.start();
@@ -369,6 +424,15 @@ int main(int argc, char* argv[]) {
         size_t fpsCounter = 0;
 
         size_t perfItersCounter = 0;
+
+        cv::namedWindow(params.name, cv::WINDOW_NORMAL);
+        cv::resizeWindow(params.name, DISP_WIDTH, DISP_HEIGHT);
+
+        std::pair<std::vector<unsigned long>, std::vector<unsigned long>> prevCpuStat = getCpuStat();
+
+        auto t0 = std::chrono::steady_clock::now();
+        unsigned frameCounter = 0;
+        unsigned warmUp = 0;
 
         while (true) {
             bool readData = true;
@@ -387,14 +451,24 @@ int main(int argc, char* argv[]) {
                     batchRes.push_back(std::move(br[i]));
                 }
             }
+            if (warmUp > 20) {
+                ++frameCounter;
+            } else {
+                warmUp++;
+                if (21 == warmUp) {
+                    t0 = std::chrono::steady_clock::now();
+                }
+            }
             ++fpsCounter;
 
             if (!output.isAlive()) {
+            	res = output.pressedKey;
                 break;
             }
 
             auto currTime = timer::now();
             auto deltaTime = (currTime - lastTime);
+            static bool skipFirstReport = true;
             if (deltaTime >= samplingTimeout) {
                 auto durMsec =
                         std::chrono::duration_cast<duration>(deltaTime).count();
@@ -408,7 +482,11 @@ int main(int argc, char* argv[]) {
                         break;
                     }
                 } else {
+                    if (skipFirstReport) {
+                        skipFirstReport = false;
+                    } else {
                     averageFps = frameTime;
+                }
                 }
 
                 if (FLAGS_show_stats) {
@@ -446,8 +524,29 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
+        auto t1 = std::chrono::steady_clock::now();
+
+        std::pair<std::vector<unsigned long>, std::vector<unsigned long>> currentCpuStat = getCpuStat();
 
         network.reset();
+
+        std::vector<unsigned long> & prevIdle = prevCpuStat.first, & prevTotal = prevCpuStat.second,
+                                   & idle = currentCpuStat.first, & total = currentCpuStat.second;
+        std::vector<double> loads(prevIdle.size());
+        for (decltype(loads.size()) i = 0; i < prevIdle.size(); i++) {
+            double totalInfo = total[i] - prevTotal[i];
+            loads[i] = (totalInfo - (idle[i] - prevIdle[i])) / totalInfo * 100;
+        }
+        double summuryLoad = std::accumulate(loads.begin(), loads.end(), 0.0);
+        summuryLoad /= prevIdle.size();
+        std::cout << summuryLoad << "% CPU load\n";
+
+        typedef std::chrono::duration<double, std::ratio<1, 1000>> ms;
+        if (0 != frameCounter) {
+            ms meanOverallTimePerAllInputs = std::chrono::duration_cast<ms>(((t1 - t0)) / frameCounter);
+            std::cout << "Mean overall time per all inputs: " << std::fixed << std::setprecision(2) << meanOverallTimePerAllInputs.count()
+                      << "ms / " << std::chrono::seconds(1) / meanOverallTimePerAllInputs << "FPS\n";
+        }
     }
     catch (const std::exception& error) {
         slog::err << error.what() << slog::endl;
@@ -459,5 +558,5 @@ int main(int argc, char* argv[]) {
     }
 
     slog::info << "Execution successful" << slog::endl;
-    return 0;
+    return res;
 }
