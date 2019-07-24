@@ -139,16 +139,20 @@ void IEGraph::start(GetterFunc getterFunc, PostprocessingFunc postprocessingFunc
 
             InferenceEngine::InferRequest::Ptr req;
             {
+                std::cout << "while (!terminate):: std::unique_lock<std::mutex> lock(mtxAvalableRequests);\n"; // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                 std::unique_lock<std::mutex> lock(mtxAvalableRequests);
+                std::cout << "while (!terminate):: std::unique_lock<std::mutex> lock(mtxAvalableRequests); locked\n"; // no in 1
                 condVarAvailableRequests.wait(lock, [&]() {
                     return !availableRequests.empty() || terminate;
                 });
+                std::cout << "while (!terminate):: std::unique_lock<std::mutex> lock(mtxAvalableRequests); waited\n"; // no in 1
                 if (terminate) {
                     break;
                 }
                 req = std::move(availableRequests.front());
                 availableRequests.pop();
             }
+            std::cout << "end of while (!terminate)::std::unique_lock<std::mutex> lock(mtxAvalableRequests);\n";
 
             auto inputBlob = req->GetBlob(inputDataBlobName);
             imgsToProc.resize(batchSize);
@@ -189,15 +193,18 @@ void IEGraph::start(GetterFunc getterFunc, PostprocessingFunc postprocessingFunc
                 }
                 auto startTime = std::chrono::high_resolution_clock::now();
                 req->StartAsync();
+                std::cout << "if (perfTimerInfer.enabled()):: std::unique_lock<std::mutex> lock(mtxBusyRequests);\n";
                 std::unique_lock<std::mutex> lock(mtxBusyRequests);
                 busyBatchRequests.push({std::move(vframes), std::move(req), startTime});
             } else {
                 preprocess();
                 req->StartAsync();
+                std::cout << "if (perfTimerInfer.enabled()) else:: std::unique_lock<std::mutex> lock(mtxBusyRequests);\n";
                 std::unique_lock<std::mutex> lock(mtxBusyRequests);
                 busyBatchRequests.push({std::move(vframes), std::move(req),
                                     std::chrono::high_resolution_clock::time_point()});
             }
+            std::cout << "end of if (perfTimerInfer.enabled()):: std::unique_lock<std::mutex> lock(mtxBusyRequests);\n";
             condVarBusyRequests.notify_one();
         }
     });
@@ -227,6 +234,7 @@ std::vector<std::shared_ptr<VideoFrame> > IEGraph::getBatchData(cv::Size frameSi
     InferenceEngine::InferRequest::Ptr req;
     std::chrono::high_resolution_clock::time_point startTime;
     {
+        std::cout << "IEGraph::getBatchData(cv::Size frameSize):: std::unique_lock<std::mutex> lock(mtxBusyRequests);\n";
         std::unique_lock<std::mutex> lock(mtxBusyRequests);
         condVarBusyRequests.wait(lock, [&]() {
             return !busyBatchRequests.empty();
@@ -236,8 +244,10 @@ std::vector<std::shared_ptr<VideoFrame> > IEGraph::getBatchData(cv::Size frameSi
         startTime = std::move(busyBatchRequests.front().startTime);
         busyBatchRequests.pop();
     }
+    std::cout << "end of IEGraph::getBatchData(cv::Size frameSize):: std::unique_lock<std::mutex> lock(mtxBusyRequests);\n";
 
     if (nullptr != req && InferenceEngine::OK == req->Wait(InferenceEngine::IInferRequest::WaitMode::RESULT_READY)) {
+        std::cout << "if (nullptr != req && InferenceEngine::OK == req->Wait(InferenceEngine::IInferRequest::WaitMode::RESULT_READY))\n"; // no in 2
         auto detections = postprocessing(req, outputDataBlobNames, frameSize);
         for (decltype(detections.size()) i = 0; i < detections.size(); i ++) {
             vframes[i]->detections = std::move(detections[i]);
@@ -247,13 +257,16 @@ std::vector<std::shared_ptr<VideoFrame> > IEGraph::getBatchData(cv::Size frameSi
             perfTimerInfer.addValue(endTime - startTime);
         }
     }
+    std::cout << "end of if (nullptr != req && InferenceEngine::OK == req->Wait(InferenceEngine::IInferRequest::WaitMode::RESULT_READY))\n"; // no in 2
 
     if (nullptr != req) {
+        std::cout << "if (nullptr != req):: std::unique_lock<std::mutex> lock(mtxAvalableRequests);\n";
         std::unique_lock<std::mutex> lock(mtxAvalableRequests);
         availableRequests.push(std::move(req));
         lock.unlock();
         condVarAvailableRequests.notify_one();
     }
+    std::cout << "end of if (nullptr != req):: std::unique_lock<std::mutex> lock(mtxAvalableRequests);\n";
 
     return vframes;
 }
@@ -267,6 +280,7 @@ void IEGraph::setDetectionConfidence(float conf) {
 }
 
 IEGraph::~IEGraph() {
+    std::cout << "IEGraph::~IEGraph()\n";
     terminate = true;
     {
         std::unique_lock<std::mutex> lock(mtxAvalableRequests);

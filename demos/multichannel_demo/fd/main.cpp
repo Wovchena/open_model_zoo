@@ -406,6 +406,7 @@ int main(int argc, char* argv[]) {
         [&](const std::vector<std::shared_ptr<VideoFrame>>& result) {
             std::string str;
             if (FLAGS_show_stats) {
+                std::cout << "if (FLAGS_show_stats)\n";
                 std::unique_lock<std::mutex> lock(statMutex);
                 str = statStream.str();
             }
@@ -493,7 +494,7 @@ int main(int argc, char* argv[]) {
                     auto inputStat = sources.getStats();
                     auto inferStat = network->getStats();
                     auto outputStat = output.getStats();
-
+std::cout << "another if (FLAGS_show_stats)\n";
                     std::unique_lock<std::mutex> lock(statMutex);
                     statStream.str(std::string());
                     statStream << std::fixed << std::setprecision(1);

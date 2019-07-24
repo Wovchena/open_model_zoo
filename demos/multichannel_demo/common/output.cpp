@@ -23,7 +23,9 @@ AsyncOutput::~AsyncOutput() {
 }
 
 void AsyncOutput::push(std::vector<std::shared_ptr<VideoFrame> > &&item) {
+    std::cout << "void AsyncOutput::push(std::vector<std::shared_ptr<VideoFrame> > &&item) will lock\n";
     std::unique_lock<std::mutex> lock(mutex);
+    std::cout << "void AsyncOutput::push(std::vector<std::shared_ptr<VideoFrame> > &&item) locked\n";
     while (queue.size() >= queueSize) {
         queue.pop();
     }
