@@ -192,6 +192,14 @@ DEFINE_string(display_resolution, "1920x1080", display_resolution_message);
 /// It is a optional parameter
 DEFINE_bool(tag, false, use_tag_scheduler_message);
 
+/// @brief Number of threads to use for inference on the CPU in throughput mode (also affects Hetero cases)
+DEFINE_uint32(nthreads, 0, "nthreads");
+
+/// @brief Number of streams to use for inference on the CPU (also affects Hetero cases)
+DEFINE_string(nstreams, "", "nstreams");
+
+DEFINE_string(title, "security_barrier_camera_demo", "title");
+
 /**
 * \brief This function show a help message
 */

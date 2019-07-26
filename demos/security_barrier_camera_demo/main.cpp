@@ -13,6 +13,7 @@
 #include <vector>
 #include <set>
 
+#include <cldnn/cldnn_config.hpp>
 #include <inference_engine.hpp>
 #include <vpu/vpu_plugin_config.hpp>
 #include <ext_list.hpp>
@@ -28,6 +29,57 @@
 using namespace InferenceEngine;
 
 typedef std::chrono::duration<double, std::ratio<1, 1000>> ms;
+
+std::vector<std::string> split(const std::string &s, char delim) {
+    std::vector<std::string> result;
+    std::stringstream ss(s);
+    std::string item;
+
+    while (getline(ss, item, delim)) {
+        result.push_back(item);
+    }
+    return result;
+}
+
+std::vector<std::string> parseDevices(const std::string& device_string) {
+    std::string comma_separated_devices = device_string;
+    if (comma_separated_devices.find(":") != std::string::npos) {
+        comma_separated_devices = comma_separated_devices.substr(comma_separated_devices.find(":") + 1);
+    }
+    auto devices = split(comma_separated_devices, ',');
+    for (auto& device : devices)
+        device = device.substr(0, device.find("("));
+    return devices;
+}
+
+std::map<std::string, uint32_t> parseValuePerDevice(const std::vector<std::string>& devices,
+                                                    const std::string& values_string) {
+    //  Format: <device1>:<value1>,<device2>:<value2> or just <value>
+    auto values_string_upper = values_string;
+    std::transform(values_string_upper.begin(),
+                   values_string_upper.end(),
+                   values_string_upper.begin(),
+                   [](unsigned char c){ return std::toupper(c); });
+    std::map<std::string, uint32_t> result;
+    auto device_value_strings = split(values_string_upper, ',');
+    for (auto& device_value_string : device_value_strings) {
+        auto device_value_vec =  split(device_value_string, ':');
+        if (device_value_vec.size() == 2) {
+            auto it = std::find(devices.begin(), devices.end(), device_value_vec.at(0));
+            if (it != devices.end()) {
+                result[device_value_vec.at(0)] = std::stoi(device_value_vec.at(1));
+            }
+        } else if (device_value_vec.size() == 1) {
+            uint32_t value = std::stoi(device_value_vec.at(0));
+            for (auto& device : devices) {
+                result[device] = value;
+            }
+        } else if (device_value_vec.size() != 0) {
+            throw std::runtime_error("Unknown string format: " + values_string);
+        }
+    }
+    return result;
+}
 
 bool ParseAndCheckCommandLine(int argc, char *argv[]) {
     // ---------------------------Parsing and validation of input args--------------------------------------
@@ -293,7 +345,7 @@ bool Drawer::isReady() {
         std::map<int64_t, GridMat>& gridMats = context.drawersContext.gridMats;
         auto gridMatIt = gridMats.find(sharedVideoFrame->frameId);
         if (gridMats.end() == gridMatIt) {
-            if (2 > gridMats.size()) {  // buffer size
+            if (1 > gridMats.size()) {  // buffer size
                 return true;
             } else {
                 return false;
@@ -331,27 +383,32 @@ void Drawer::process() {
         lastShownframeId++;
         cv::Mat mat = firstGridIt->second.getMat();
 
+        static auto lastFpsUpdate = std::chrono::steady_clock::now();
+        static std::chrono::steady_clock::duration lastDuration = std::chrono::seconds{5};
+        static unsigned lastFps = 0;
+        static unsigned curFps = 1;
+
         float opacity = 0.6f;
-        fillROIColor(mat, cv::Rect(5, 5, 700, 115), cv::Scalar(255, 0, 0), opacity);
+        fillROIColor(mat, cv::Rect(5, 5, 390, 115), cv::Scalar(255, 0, 0), opacity);
 
-        std::ostringstream out;
-        out << "Mean overall time per all inputs: " << std::fixed << std::setprecision(2) << std::setw(6);
-        const auto t1 = std::chrono::steady_clock::now();
-        uint64_t frameCounter = context.frameCounter;
-        const ms meanOverallTimePerAllInputs = std::chrono::duration_cast<ms>((t1 - context.t0)
-                                               * context.readersContext.inputChannels.size()) / frameCounter;
-        out << meanOverallTimePerAllInputs.count();
-        out << "ms /" << std::setw(6) << std::chrono::seconds(1) / meanOverallTimePerAllInputs << "FPS";
+        if (0 != lastFps) {
+            std::ostringstream out;
+            out << std::fixed << std::setprecision(1);
+            // const auto t1 = std::chrono::steady_clock::now();
+            const ms meanOverallTimePerAllInputs = std::chrono::duration_cast<ms>((lastDuration) / lastFps);
+            out << lastFps / 5 << "FPS / " << meanOverallTimePerAllInputs.count() << "ms";
 
-        cv::putText(mat, out.str(), cv::Point2f(10, 35), cv::FONT_HERSHEY_TRIPLEX, 0.7, cv::Scalar{255, 255, 255});
-        cv::putText(mat, "Detection InferRequests usage", cv::Point2f(10, 70), cv::FONT_HERSHEY_TRIPLEX, 0.7, cv::Scalar{255, 255, 255});
-        cv::Rect usage(15, 90, 400, 20);
+            cv::putText(mat, out.str(), cv::Point2f(15, 35), cv::FONT_HERSHEY_TRIPLEX, 0.7, cv::Scalar{255, 255, 255});
+        }
+        cv::putText(mat, "Detection InferRequests usage", cv::Point2f(15, 70), cv::FONT_HERSHEY_TRIPLEX, 0.7, cv::Scalar{255, 255, 255});
+        cv::Rect usage(15, 90, 370, 20);
         cv::rectangle(mat, usage, {0, 255, 0}, 2);
         uint64_t nireq = context.nireq;
+        uint64_t frameCounter = context.frameCounter;
         usage.width = static_cast<int>(usage.width * static_cast<float>(frameCounter * nireq - context.freeDetectionInfersCount) / (frameCounter * nireq));
         cv::rectangle(mat, usage, {0, 255, 0}, cv::FILLED);
 
-        cv::imshow("Detection results", firstGridIt->second.getMat());
+        cv::imshow(FLAGS_title, firstGridIt->second.getMat());
         context.drawersContext.prevShow = std::chrono::steady_clock::now();
         const int key = cv::waitKey(context.drawersContext.pause);
         if (key == 27 || 'q' == key || 'Q' == key || !context.isVideo) {
@@ -364,6 +421,14 @@ void Drawer::process() {
         firstGridIt->second.clear();
         gridMats.emplace((--gridMats.end())->first + 1, firstGridIt->second);
         gridMats.erase(firstGridIt);
+
+        auto now = std::chrono::steady_clock::now();
+        if (now - lastFpsUpdate > std::chrono::seconds{5}) {
+            lastDuration = now - lastFpsUpdate;
+            lastFps = curFps;
+            curFps = 1;
+            lastFpsUpdate = now;
+        } else curFps++;
     }
     context.drawersContext.drawerMutex.unlock();
 }
@@ -641,6 +706,9 @@ int main(int argc, char* argv[]) {
                     return 1;
                 }
                 videoCapture.set(cv::CAP_PROP_FPS , 30);
+                videoCapture.set(cv::CAP_PROP_BUFFERSIZE , 1);
+                videoCapture.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+                videoCapture.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
                 videoCapturSourcess.push_back(std::make_shared<VideoCaptureSource>(videoCapture, FLAGS_loop_video));
             }
         }
@@ -682,11 +750,9 @@ int main(int argc, char* argv[]) {
         InferenceEngine::Core ie;
 
         std::set<std::string> loadedDevices;
-        std::vector<std::string> pluginNames = {
-                FLAGS_d,
-                FLAGS_d_va,
-                FLAGS_d_lpr
-        };
+        std::vector<std::string> pluginNames = {FLAGS_d};
+        if (!FLAGS_m_va.empty()) pluginNames.push_back(FLAGS_d_va);
+        if (!FLAGS_m_lpr.empty()) pluginNames.push_back(FLAGS_d_lpr);
 
         for (auto && flag : pluginNames) {
             if (flag.empty())
@@ -709,15 +775,9 @@ int main(int argc, char* argv[]) {
                     ie.AddExtension(extension_ptr, "CPU");
                     slog::info << "CPU Extension loaded: " << FLAGS_l << slog::endl;
                 }
-                if (inputChannels.size() > 1) {
-                    ie.SetConfig({{PluginConfigParams::KEY_CPU_THROUGHPUT_STREAMS, PluginConfigParams::CPU_THROUGHPUT_AUTO}}, "CPU");
-                }
             }
 
             if ((flag.find("GPU") != std::string::npos)) {
-                if (inputChannels.size() > 1) {
-                    ie.SetConfig({{PluginConfigParams::KEY_GPU_THROUGHPUT_STREAMS, std::to_string(inputChannels.size())}}, "GPU");
-                }
                 // Load any user-specified clDNN Extensions
                 if (!FLAGS_c.empty())
                     ie.SetConfig({ { PluginConfigParams::KEY_CONFIG_FILE, FLAGS_c } }, "GPU");
@@ -726,8 +786,44 @@ int main(int argc, char* argv[]) {
             if ((flag.find("FPGA") != std::string::npos) && !FLAGS_fpga_device_ids.empty()) {
                 ie.SetConfig({ { InferenceEngine::PluginConfigParams::KEY_DEVICE_ID, FLAGS_fpga_device_ids } }, "FPGA");
             }
+            auto devices = parseDevices(flag);
+            std::map<std::string, uint32_t> device_nstreams = parseValuePerDevice(devices, FLAGS_nstreams);
+            for (auto& device : devices) {
+                if (device == "CPU") {  // CPU supports few special performance-oriented keys
+                    // limit threading for CPU portion of inference
+                    if (FLAGS_nthreads != 0)
+                        ie.SetConfig({{ CONFIG_KEY(CPU_THREADS_NUM), std::to_string(FLAGS_nthreads) }}, device);
+                    ie.SetConfig({{ CONFIG_KEY(CPU_BIND_THREAD), CONFIG_VALUE(NO) }}, device);
+
+                    // for CPU execution, more throughput-oriented execution via streams
+                    ie.SetConfig({{ CONFIG_KEY(CPU_THROUGHPUT_STREAMS),
+                                    (device_nstreams.count(device) > 0 ? std::to_string(device_nstreams.at(device)) :
+                                                                        "CPU_THROUGHPUT_AUTO") }}, device);
+                    device_nstreams[device] = std::stoi(ie.GetConfig(device, CONFIG_KEY(CPU_THROUGHPUT_STREAMS)).as<std::string>());
+                } else if (device == ("GPU")) {
+                    ie.SetConfig({{ CONFIG_KEY(GPU_THROUGHPUT_STREAMS),
+                                    (device_nstreams.count(device) > 0 ? std::to_string(device_nstreams.at(device)) :
+                                                                        "GPU_THROUGHPUT_AUTO") }}, device);
+                    device_nstreams[device] = std::stoi(ie.GetConfig(device, CONFIG_KEY(GPU_THROUGHPUT_STREAMS)).as<std::string>());
+
+                    if ((flag.find("MULTI") != std::string::npos) &&
+                        (flag.find("CPU") != std::string::npos)) {
+                        // multi-device execution with the CPU + GPU performs best with GPU trottling hint,
+                        // which releases another CPU thread (that is otherwise used by the GPU driver for active polling)
+                        ie.SetConfig({{ CLDNN_CONFIG_KEY(PLUGIN_THROTTLE), "1" }}, "GPU");
+                    }
+                } else if (device == "MYRIAD") {
+                    ie.SetConfig({{ CONFIG_KEY(LOG_LEVEL), CONFIG_VALUE(LOG_NONE) },
+                                { VPU_CONFIG_KEY(LOG_LEVEL), CONFIG_VALUE(LOG_WARNING) }}, device);
+                }
+            }
 
             loadedDevices.insert(flag);
+            std::cout << "Using";
+            for (auto& nstreams : device_nstreams) {
+                std::cout << ' ' << nstreams.second << " streams for " << nstreams.first << ";";
+            }
+            std::cout << '\n';
         }
 
         /** Per layer metrics **/
@@ -779,7 +875,7 @@ int main(int argc, char* argv[]) {
         cv::Size displayResolution = cv::Size{std::stoi(FLAGS_display_resolution.substr(0, found)),
                                               std::stoi(FLAGS_display_resolution.substr(found + 1, FLAGS_display_resolution.length()))};
 
-        slog::info << "Number of InferRequests: " << nireq << slog::endl;
+        slog::info << "Number of InferRequests: " << nireq << " + " << nclassifiersireq << " + " << nrecognizersireq << slog::endl;
         slog::info << "Display resolution: " << FLAGS_display_resolution << slog::endl;
 
         Context context{inputChannels, worker,
@@ -806,11 +902,11 @@ int main(int argc, char* argv[]) {
         }
 
         // Running
-        context.t0 = std::chrono::steady_clock::now();
         worker->runThreads();
+        context.t0 = std::chrono::steady_clock::now();
         worker->threadFunc();
-        worker->join();
         const auto t1 = std::chrono::steady_clock::now();
+        worker->join();
 
         for (auto& net : std::array<std::pair<std::vector<InferRequest>, std::string>, 3>{
             std::make_pair(context.detectorsInfers.getActualInferRequests(), FLAGS_d),
