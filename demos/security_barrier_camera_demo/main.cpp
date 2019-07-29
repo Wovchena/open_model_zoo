@@ -384,29 +384,29 @@ void Drawer::process() {
         cv::Mat mat = firstGridIt->second.getMat();
 
         static auto lastFpsUpdate = std::chrono::steady_clock::now();
-        static std::chrono::steady_clock::duration lastDuration = std::chrono::seconds{5};
+        static std::chrono::steady_clock::duration lastDuration = std::chrono::seconds{1};
         static unsigned lastFps = 0;
         static unsigned curFps = 1;
 
         float opacity = 0.6f;
-        fillROIColor(mat, cv::Rect(5, 5, 390, 115), cv::Scalar(255, 0, 0), opacity);
+        fillROIColor(mat, cv::Rect(5, 5, 250, 50), cv::Scalar(255, 0, 0), opacity);
 
         if (0 != lastFps) {
             std::ostringstream out;
             out << std::fixed << std::setprecision(1);
             // const auto t1 = std::chrono::steady_clock::now();
             const ms meanOverallTimePerAllInputs = std::chrono::duration_cast<ms>((lastDuration) / lastFps);
-            out << lastFps / 5 << "FPS / " << meanOverallTimePerAllInputs.count() << "ms";
+            out << (static_cast<double>(lastFps) / lastDuration.count() * 1000000000l) << "FPS / " << meanOverallTimePerAllInputs.count() << "ms";
 
             cv::putText(mat, out.str(), cv::Point2f(15, 35), cv::FONT_HERSHEY_TRIPLEX, 0.7, cv::Scalar{255, 255, 255});
         }
-        cv::putText(mat, "Detection InferRequests usage", cv::Point2f(15, 70), cv::FONT_HERSHEY_TRIPLEX, 0.7, cv::Scalar{255, 255, 255});
-        cv::Rect usage(15, 90, 370, 20);
-        cv::rectangle(mat, usage, {0, 255, 0}, 2);
-        uint64_t nireq = context.nireq;
-        uint64_t frameCounter = context.frameCounter;
-        usage.width = static_cast<int>(usage.width * static_cast<float>(frameCounter * nireq - context.freeDetectionInfersCount) / (frameCounter * nireq));
-        cv::rectangle(mat, usage, {0, 255, 0}, cv::FILLED);
+        // cv::putText(mat, "Detection InferRequests usage", cv::Point2f(15, 70), cv::FONT_HERSHEY_TRIPLEX, 0.7, cv::Scalar{255, 255, 255});
+        // cv::Rect usage(15, 90, 370, 20);
+        // cv::rectangle(mat, usage, {0, 255, 0}, 2);
+        // uint64_t nireq = context.nireq;
+        // uint64_t frameCounter = context.frameCounter;
+        // usage.width = static_cast<int>(usage.width * static_cast<float>(frameCounter * nireq - context.freeDetectionInfersCount) / (frameCounter * nireq));
+        // cv::rectangle(mat, usage, {0, 255, 0}, cv::FILLED);
 
         cv::imshow(FLAGS_title, firstGridIt->second.getMat());
         context.drawersContext.prevShow = std::chrono::steady_clock::now();
@@ -423,7 +423,7 @@ void Drawer::process() {
         gridMats.erase(firstGridIt);
 
         auto now = std::chrono::steady_clock::now();
-        if (now - lastFpsUpdate > std::chrono::seconds{5}) {
+        if (now - lastFpsUpdate > std::chrono::seconds{1}) {
             lastDuration = now - lastFpsUpdate;
             lastFps = curFps;
             curFps = 1;
