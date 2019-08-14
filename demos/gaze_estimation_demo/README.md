@@ -37,7 +37,7 @@ gaze_estimation_demo [OPTION]
 Options:
 
     -h                       Print a usage message.
-    -i "<path>"              Optional. Path to a video file. Default value is "cam" to work with camera.
+    -i "<path>"              Optional. Path to an image or a video file. Default value is "cam" to work with camera.
     -m "<path>"              Required. Path to an .xml file with a trained Gaze Estimation model.
     -m_fd "<path>"           Required. Path to an .xml file with a trained Face Detection model.
     -m_hp "<path>"           Required. Path to an .xml file with a trained Head Pose Estimation model.
@@ -45,7 +45,7 @@ Options:
     -d "<device>"            Optional. Target device for Gaze Estimation network (the list of available devices is shown below). Use "-d HETERO:<comma-separated_devices_list>" format to specify HETERO plugin. The demo will look for a suitable plugin for a specified device. Default value is "CPU".
     -d_fd "<device>"         Optional. Target device for Face Detection network (the list of available devices is shown below). Use "-d HETERO:<comma-separated_devices_list>" format to specify HETERO plugin. The demo will look for a suitable plugin for a specified device. Default value is "CPU".
     -d_hp "<device>"         Optional. Target device for Head Pose Estimation network (the list of available devices is shown below). Use "-d HETERO:<comma-separated_devices_list>" format to specify HETERO plugin. The demo will look for a suitable plugin for a specified device. Default value is "CPU".
-    -d_lm "<device>"         Optional. Target device for Facial Landmarks Estimation network (the list of available devices is shown below). Use "-d HETERO:<comma-separated_devices_list>" format to specify HETERO plugin. The demo will look for a suitable plugin for a specified device. Default value is "CPU".
+    -d_lm "<device>"         Optional. Target device for Facial Landmarks Estimation network (the list of available devices is shown below). Use "-d HETERO:<comma-separated_devices_list>" format to specify HETERO plugin. The demo will look for a suitable plugin for device specified. Default value is "CPU".
     -res "<WxH>"             Optional. Set camera resolution in format WxH.
     -fd_reshape              Optional. Reshape Face Detector network so that its input resolution has the same aspect ratio as the input frame.
     -no_show                 Optional. Do not show processed video.

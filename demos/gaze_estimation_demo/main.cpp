@@ -91,29 +91,31 @@ int main(int argc, char *argv[]) {
 
         slog::info << "Reading input" << slog::endl;
         cv::VideoCapture cap;
+        cv::Mat frame = cv::imread(FLAGS_i);
+        bool isVideo = frame.empty();
+        if (isVideo) {
+            if (!(FLAGS_i == "cam" ? cap.open(0) : cap.open(FLAGS_i))) {
+                throw std::logic_error("Cannot open input file or camera: " + FLAGS_i);
+            }
 
-        if (!(FLAGS_i == "cam" ? cap.open(0) : cap.open(FLAGS_i))) {
-            throw std::logic_error("Cannot open input file or camera: " + FLAGS_i);
-        }
+            // Parse camera resolution parameter and set camera resolution
+            if (FLAGS_i == "cam" && FLAGS_res != "") {
+                auto xPos = FLAGS_res.find("x");
+                if (xPos == std::string::npos)
+                    throw std::runtime_error("Incorrect -res parameter format, please use 'x' to separate width and height");
+                int frameWidth, frameHeight;
+                std::stringstream widthStream(FLAGS_res.substr(0, xPos));
+                widthStream >> frameWidth;
+                std::stringstream heightStream(FLAGS_res.substr(xPos + 1));
+                heightStream >> frameHeight;
+                cap.set(cv::CAP_PROP_FRAME_WIDTH, frameWidth);
+                cap.set(cv::CAP_PROP_FRAME_HEIGHT, frameHeight);
+            }
 
-        // Parse camera resolution parameter and set camera resolution
-        if (FLAGS_i == "cam" && FLAGS_res != "") {
-            auto xPos = FLAGS_res.find("x");
-            if (xPos == std::string::npos)
-                throw std::runtime_error("Incorrect -res parameter format, please use 'x' to separate width and height");
-            int frameWidth, frameHeight;
-            std::stringstream widthStream(FLAGS_res.substr(0, xPos));
-            widthStream >> frameWidth;
-            std::stringstream heightStream(FLAGS_res.substr(xPos + 1));
-            heightStream >> frameHeight;
-            cap.set(cv::CAP_PROP_FRAME_WIDTH, frameWidth);
-            cap.set(cv::CAP_PROP_FRAME_HEIGHT, frameHeight);
-        }
-
-        // read input (video) frame
-        cv::Mat frame;
-        if (!cap.read(frame)) {
-            throw std::logic_error("Failed to get frame from cv::VideoCapture");
+            // read input (video) frame
+            if (!cap.read(frame)) {
+                throw std::logic_error("Failed to get frame from cv::VideoCapture");
+            }
         }
 
         bool flipImage = false;
@@ -151,7 +153,6 @@ int main(int argc, char *argv[]) {
         ExponentialAverager overallTimeAverager(smoothingFactor, 30.);
         ExponentialAverager inferenceTimeAverager(smoothingFactor, 30.);
 
-        int delay = 1;
         std::string windowName = "Gaze estimation demo";
         double overallTime = 0., inferenceTime = 0.;
         auto tIterationBegins = cv::getTickCount();
@@ -205,7 +206,7 @@ int main(int argc, char *argv[]) {
             cv::imshow(windowName, frame);
 
             // Controls the information being displayed while demo runs
-            char key = static_cast<char>(cv::waitKey(delay));
+            char key = static_cast<char>(cv::waitKey(isVideo));
             resultsMarker.toggle(key);
 
             // Press 'Esc' to quit, 'f' to flip the video horizontally

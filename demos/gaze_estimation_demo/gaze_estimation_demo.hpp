@@ -20,7 +20,7 @@
 static const char help_message[] = "Print a usage message.";
 
 /// @brief Message for images argument
-static const char video_message[] = "Optional. Path to a video file. Default value is \"cam\" to work with camera.";
+static const char video_message[] = "Optional. Path to an image or a video file. Default value is \"cam\" to work with camera.";
 
 /// @brief message for model argument
 static const char gaze_estimation_model_message[] = "Required. Path to an .xml file with a trained Gaze Estimation model.";
