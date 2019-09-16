@@ -100,6 +100,7 @@ def main():
     else:
         input_stream = args.input
     cap = cv2.VideoCapture(input_stream)
+    print(cv2.VideoCapture.getBackendName(cap))
     assert cap.isOpened(), "Can't open input"
 
     if args.labels:
@@ -199,4 +200,4 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main() or 0)
+    sys.exit(main() or 1)

@@ -18,7 +18,7 @@ import sys
 from args import *
 from image_sequences import IMAGE_SEQUENCES
 
-ALL_DEVICES = ['CPU', 'GPU']
+ALL_DEVICES = ['CPU']
 
 TestCase = collections.namedtuple('TestCase', ['options'])
 
