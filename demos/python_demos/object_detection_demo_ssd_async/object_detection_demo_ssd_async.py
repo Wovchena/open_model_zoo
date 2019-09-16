@@ -113,7 +113,7 @@ def main():
     next_request_id = 1
 
     log.info("Starting inference in async mode...")
-    is_async_mode = True
+    is_async_mode = False
     render_time = 0
     ret, frame = cap.read()
 
@@ -127,6 +127,7 @@ def main():
             ret, frame = cap.read()
         if not ret:
             break
+        print(frame.shape)
         initial_w = cap.get(3)
         initial_h = cap.get(4)
         # Main sync point:
