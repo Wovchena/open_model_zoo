@@ -99,7 +99,7 @@ def main():
         input_stream = 0
     else:
         input_stream = args.input
-    cap = cv2.VideoCapture(input_stream)
+    cap = cv2.VideoCapture(input_stream, cv2.CAP_IMAGES)
     print(cv2.VideoCapture.getBackendName(cap))
     assert cap.isOpened(), "Can't open input"
 
