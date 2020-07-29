@@ -25,16 +25,18 @@ CnnBase::CnnBase(const Config& config,
 void CnnBase::Load() {
     auto cnnNetwork = ie_.ReadNetwork(config_.path_to_model);
 
-    const int currentBatchSize = cnnNetwork.getBatchSize();
-    if (currentBatchSize != config_.max_batch_size)
-        cnnNetwork.setBatchSize(config_.max_batch_size);
-
-    InferenceEngine::InputsDataMap in;
-    in = cnnNetwork.getInputsInfo();
-    if (in.size() != 1) {
+    ICNNNetwork::InputShapes inputShapes = cnnNetwork.getInputShapes();
+    if (inputShapes.size() != 1) {
         THROW_IE_EXCEPTION << "Network should have only one input";
     }
+    SizeVector& inSizeVector = inputShapes.begin()->second;
+    if (inSizeVector.size() != 4) {
+        THROW_IE_EXCEPTION << "Network should have 4-dimensional input";
+    }
+    inSizeVector[0] = config_.max_batch_size;
+    cnnNetwork.reshape(inputShapes);
 
+    InferenceEngine::InputsDataMap in = cnnNetwork.getInputsInfo();
     SizeVector inputDims = in.begin()->second->getTensorDesc().getDims();
     in.begin()->second->setPrecision(Precision::U8);
     input_blob_ = make_shared_blob<uint8_t>(TensorDesc(Precision::U8, inputDims, Layout::NCHW));
