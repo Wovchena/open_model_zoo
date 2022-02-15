@@ -27,13 +27,15 @@ sys.path.append(str(Path(__file__).resolve().parents[2] / 'common/python'))
 
 from openvino.model_zoo.model_api.models import DetectionModel, DetectionWithLandmarks, RESIZE_TYPES, OutputTransform
 from openvino.model_zoo.model_api.performance_metrics import PerformanceMetrics
-from openvino.model_zoo.model_api.pipelines import get_user_config, AsyncPipeline
-from openvino.model_zoo.model_api.adapters import create_core, OpenvinoAdapter, OVMSAdapter
+from openvino.model_zoo.model_api.pipelines import get_user_config
+from openvino.model_zoo.model_api.adapters import create_core
 
 import monitors
 from images_capture import open_images_capture
 from helpers import resolution, log_latency_per_stage
 from visualizers import ColorPalette
+
+from prop import OvInferrer
 
 log.basicConfig(format='[ %(levelname)s ] %(message)s', level=log.DEBUG, stream=sys.stdout)
 
@@ -141,8 +143,7 @@ def draw_detections(frame, detections, palette, labels, output_transform):
     return frame
 
 
-def print_raw_results(detections, labels, frame_id):
-    log.debug(' ------------------- Frame # {} ------------------ '.format(frame_id))
+def print_raw_results(detections, labels):
     log.debug(' Class ID | Confidence | XMIN | YMIN | XMAX | YMAX ')
     for detection in detections:
         xmin, ymin, xmax, ymax = detection.get_coords()
@@ -163,10 +164,10 @@ def main():
 
     if args.adapter == 'openvino':
         plugin_config = get_user_config(args.device, args.num_streams, args.num_threads)
-        model_adapter = OpenvinoAdapter(create_core(), args.model, device=args.device, plugin_config=plugin_config,
-                                        max_num_requests=args.num_infer_requests, model_parameters = {'input_layouts': args.layout})
+        inferer = OvInferrer(create_core(), args.model, device=args.device, plugin_config=plugin_config,
+            nireq=args.num_infer_requests)
     elif args.adapter == 'ovms':
-        model_adapter = OVMSAdapter(args.model)
+        raise 'kek'  # TODO
 
     configuration = {
         'resize_type': args.resize_type,
@@ -177,122 +178,65 @@ def main():
         'confidence_threshold': args.prob_threshold,
         'input_size': args.input_size, # The CTPN specific
     }
-    model = DetectionModel.create_model(args.architecture_type, model_adapter, configuration)
-    model.log_layers_info()
+    processor = DetectionModel.create_model(args.architecture_type, inferer, configuration)
+    processor.log_layers_info()  # TODO: merge to init
+    processor.load()  # TODO: merge to init
 
-    detector_pipeline = AsyncPipeline(model)
-
-    next_frame_id = 0
-    next_frame_id_to_show = 0
-
-    palette = ColorPalette(len(model.labels) if model.labels else 100)
+    palette = ColorPalette(len(processor.labels) if processor.labels else 100)
     metrics = PerformanceMetrics()
     render_metrics = PerformanceMetrics()
-    presenter = None
-    output_transform = None
-    video_writer = cv2.VideoWriter()
+    presenter = monitors.Presenter(args.utilization_monitors)
+    output_transform = OutputTransform((1280, 720), args.output_resolution)  # TODO
+    preprocess_metrics = PerformanceMetrics()
+    postprocess_metrics = PerformanceMetrics()
+    class LazyVideoWriter:
+        def write(self, im):
+            pass
+    video_writer = LazyVideoWriter()
 
-    while True:
-        if detector_pipeline.callback_exceptions:
-            raise detector_pipeline.callback_exceptions[0]
-        # Process all completed requests
-        results = detector_pipeline.get_result(next_frame_id_to_show)
-        if results:
-            objects, frame_meta = results
-            frame = frame_meta['frame']
-            start_time = frame_meta['start_time']
-
-            if len(objects) and args.raw_output_message:
-                print_raw_results(objects, model.labels, next_frame_id_to_show)
-
-            presenter.drawGraphs(frame)
-            rendering_start_time = perf_counter()
-            frame = draw_detections(frame, objects, palette, model.labels, output_transform)
-            render_metrics.update(rendering_start_time)
-            metrics.update(start_time, frame)
-
-            if video_writer.isOpened() and (args.output_limit <= 0 or next_frame_id_to_show <= args.output_limit-1):
-                video_writer.write(frame)
-            next_frame_id_to_show += 1
-
-            if not args.no_show:
-                cv2.imshow('Detection Results', frame)
-                key = cv2.pollKey()
-
-                ESC_KEY = 27
-                # Quit.
-                if key in {ord('q'), ord('Q'), ESC_KEY}:
-                    break
-                presenter.handleKey(key)
-            continue
-
-        if detector_pipeline.is_ready():
-            # Get new image/frame
+    for state in OvInferrer.Iterate(inferer):
+        if state is None:
             start_time = perf_counter()
             frame = cap.read()
             if frame is None:
-                if next_frame_id == 0:
-                    raise ValueError("Can't read an image from the input")
-                break
-            if next_frame_id == 0:
-                output_transform = OutputTransform(frame.shape[:2], args.output_resolution)
-                if args.output_resolution:
-                    output_resolution = output_transform.new_resolution
-                else:
-                    output_resolution = (frame.shape[1], frame.shape[0])
-                presenter = monitors.Presenter(args.utilization_monitors, 55,
-                                               (round(output_resolution[0] / 4), round(output_resolution[1] / 8)))
-                if args.output and not video_writer.open(args.output, cv2.VideoWriter_fourcc(*'MJPG'),
-                                                         cap.fps(), output_resolution):
-                    raise RuntimeError("Can't open video writer")
-            # Submit for inference
-            detector_pipeline.submit_data(frame, next_frame_id, {'frame': frame, 'start_time': start_time})
-            next_frame_id += 1
-        else:
-            # Wait for empty request
-            detector_pipeline.await_any()
-
-    detector_pipeline.await_all()
-    if detector_pipeline.callback_exceptions:
-        raise detector_pipeline.callback_exceptions[0]
-    # Process completed requests
-    for next_frame_id_to_show in range(next_frame_id_to_show, next_frame_id):
-        results = detector_pipeline.get_result(next_frame_id_to_show)
-        objects, frame_meta = results
-        frame = frame_meta['frame']
-        start_time = frame_meta['start_time']
-
+                inferer.end()
+            else:
+                preprocessing_start_time = perf_counter()
+                inputs, preprocessing_meta = processor.preprocess(frame)
+                preprocess_metrics.update(preprocessing_start_time)
+                inferer.submit(inputs, (frame, start_time, preprocessing_meta))
+            continue
+        postprocessing_start_time = perf_counter()
+        output, (frame, start_time, preprocessing_meta) = state
+        objects = processor.postprocess(output, preprocessing_meta)
+        postprocess_metrics.update(postprocessing_start_time)
         if len(objects) and args.raw_output_message:
-            print_raw_results(objects, model.labels, next_frame_id_to_show)
+            print_raw_results(objects, processor.labels)
 
         presenter.drawGraphs(frame)
         rendering_start_time = perf_counter()
-        frame = draw_detections(frame, objects, palette, model.labels, output_transform)
+        frame = draw_detections(frame, objects, palette, processor.labels, output_transform)
         render_metrics.update(rendering_start_time)
         metrics.update(start_time, frame)
 
-        if video_writer.isOpened() and (args.output_limit <= 0 or next_frame_id_to_show <= args.output_limit-1):
-            video_writer.write(frame)
+        video_writer.write(frame)
 
         if not args.no_show:
-            cv2.imshow('Detection Results', frame)
-            key = cv2.waitKey(1)
-
-            ESC_KEY = 27
-            # Quit.
-            if key in {ord('q'), ord('Q'), ESC_KEY}:
+            cv2.imshow(__file__, frame)
+            key = cv2.pollKey()
+            if key in {ord('Q'), ord('q'), 27}:  # Esc
                 break
             presenter.handleKey(key)
 
     metrics.log_total()
     log_latency_per_stage(cap.reader_metrics.get_latency(),
-                          detector_pipeline.preprocess_metrics.get_latency(),
-                          detector_pipeline.inference_metrics.get_latency(),
-                          detector_pipeline.postprocess_metrics.get_latency(),
-                          render_metrics.get_latency())
+        preprocess_metrics.get_latency(),
+        preprocess_metrics.get_latency(),  # TODO
+        postprocess_metrics.get_latency(),
+        render_metrics.get_latency())
     for rep in presenter.reportMeans():
         log.info(rep)
 
 
 if __name__ == '__main__':
-    sys.exit(main() or 0)
+    main()

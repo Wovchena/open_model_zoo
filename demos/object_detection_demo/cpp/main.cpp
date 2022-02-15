@@ -420,7 +420,7 @@ int main(int argc, char *argv[]) {
                 if (!FLAGS_no_show) {
                     cv::imshow("Detection Results", outFrame);
                     //--- Processing keyboard events
-                    int key = cv::waitKey(1);
+                    int key = cv::pollKey();
                     if (27 == key || 'q' == key || 'Q' == key) {  // Esc
                         keepRunning = false;
                     } else {
@@ -448,7 +448,7 @@ int main(int argc, char *argv[]) {
                 if (!FLAGS_no_show) {
                     cv::imshow("Detection Results", outFrame);
                     //--- Updating output window
-                    cv::waitKey(1);
+                    cv::pollKey();
                 }
             }
         }
