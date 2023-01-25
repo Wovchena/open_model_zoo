@@ -20,8 +20,8 @@ from pathlib import Path
 
 import cv2
 
-sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools/model_tools/src'))
-sys.path.append(str(Path(__file__).resolve().parents[1] / 'demos/common/python'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'demos/common/python'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools/model_tools/src'))
 
 from openvino.model_zoo.model_api.models import DetectionModel
 
@@ -36,15 +36,14 @@ def main():
 
     INFERENCE_NUMBER = 10
     results = [False for _ in range(INFERENCE_NUMBER)]  # container for results
-    def callback(request, userdata):
-        print(f"Done! Number: {userdata}")
+    def callback(result, meta, userdata):
+        print(f"Number: {userdata}, Meta: {meta}, Result: {result}")
         results[userdata] = True
 
     model.set_callback(callback)
     ## Run parallel inference
     for i in range(INFERENCE_NUMBER):
-        dict_inputs, meta = model.preprocess(image)
-        model.infer_async(dict_inputs, callback_data=i)
+        model.infer_async(image, i)
     model.await_all()
     assert(all(results))
 

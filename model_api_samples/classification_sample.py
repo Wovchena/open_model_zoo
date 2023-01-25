@@ -20,8 +20,8 @@ from pathlib import Path
 
 import cv2
 
-sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools/model_tools/src'))
-sys.path.append(str(Path(__file__).resolve().parents[1] / 'demos/common/python'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'demos/common/python'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools/model_tools/src'))
 
 from openvino.model_zoo.model_api.models import Classification
 
@@ -61,9 +61,10 @@ def main():
     if image is None:
         raise RuntimeError('Failed to read the image')
     classifications = classifier(image)
-    image = draw_labels(image, classifications)
-    cv2.imshow('Detection Results', image)
-    cv2.waitKey(0)
+    print(f"Result: {classifications}")
+    #image = draw_labels(image, classifications)
+    #cv2.imshow('Detection Results', image)
+    #cv2.waitKey(0)
 
 
 if __name__ == '__main__':
