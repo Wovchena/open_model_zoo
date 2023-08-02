@@ -67,6 +67,37 @@ namespace nets {
 G_API_NET(Classification, <cv::GMat(cv::GMat)>, "classification");
 }
 
+template<typename Outs>
+struct Iterate {
+    struct Iterator {
+        cv::GStreamingCompiled& pipeline;
+        Outs outs;
+        // Assume arg is always a result of Iterate::end()
+        // because I care about range based for loop here only
+        bool operator!=(const Iterator& arg) {
+            return pipeline.pull(cv::GRunArgsP{outs});
+        };
+        Iterator& operator++() {return *this;}
+        Outs& operator*() {return outs;}
+    };
+    cv::GStreamingCompiled pipeline;
+    // Make GRunArgs&& ins be a part of the constructor to represent that the
+    // objects produced by iterating are a modified version of what
+    // ins produce. In other words, cv::GStreamingCompiled can be
+    // viewed as a mapping function from ins[i]->pull() to Outs with
+    // pipelining delay. Maybe it's even possible to enable C++20 Pipelining "|"
+    Iterate(cv::GStreamingCompiled pipeline, cv::GRunArgs&& ins) : pipeline(pipeline) {
+        pipeline.setSource(std::move(ins));
+    }
+    Iterator begin() {
+        pipeline.start();
+        return Iterator{pipeline};
+    }
+    Iterator end() {
+        return Iterator{pipeline};
+    }
+};
+
 int main(int argc, char* argv[]) {
     try {
         PerformanceMetrics metrics, readerMetrics, renderMetrics;
@@ -148,10 +179,6 @@ int main(int argc, char* argv[]) {
                                               cv::gapi::networks(net),
                                               cv::gapi::streaming::queue_capacity{1}));
 
-        /** Output container for result **/
-        cv::Mat output;
-        IndexScore infer_result;
-
         /** ---------------- The execution part ---------------- **/
         std::shared_ptr<ImagesCapture> cap = openImagesCapture(FLAGS_i,
                                                                true,
@@ -160,7 +187,6 @@ int main(int argc, char* argv[]) {
                                                                std::numeric_limits<size_t>::max(),
                                                                stringToSize(FLAGS_res));
         auto pipeline_inputs = cv::gin(cv::gapi::wip::make_src<custom::CommonCapSrc>(cap));
-        pipeline.setSource(std::move(pipeline_inputs));
         std::string windowName = "Classification Benchmark demo G-API";
         int delay = 1;
 
@@ -176,7 +202,6 @@ int main(int argc, char* argv[]) {
         }
 
         ClassificationGridMat gridMat(presenter, cv::Size(width, height));
-        bool keepRunning = true;
         size_t framesNum = 0;
         long long correctPredictionsCount = 0;
         unsigned int framesNumOnCalculationStart = 0;
@@ -186,14 +211,20 @@ int main(int argc, char* argv[]) {
         std::chrono::seconds testDuration = std::chrono::seconds(3);
         std::chrono::seconds fpsCalculationDuration = std::chrono::seconds(1);
         auto startTime = std::chrono::steady_clock::now();
-        pipeline.start();
         IndexScore::LabelsStorage top_k_scored_labels;
         top_k_scored_labels.reserve(FLAGS_nt);
-        int64_t timestamp = 0;
         size_t total_produced_image_count = 0;
         std::chrono::steady_clock::time_point output_latency_last_frame_appeared_ts = std::chrono::steady_clock::now();
         std::chrono::steady_clock::duration output_latency {0};
-        while (keepRunning && elapsedSeconds < std::chrono::seconds(FLAGS_time) && pipeline.pull(cv::gout(output, infer_result, timestamp))) {
+        struct Result {
+            cv::Mat output;
+            IndexScore infer_result;
+            int64_t timestamp;
+            explicit operator cv::GRunArgsP() {
+                return cv::gout(output, infer_result, timestamp);
+            }
+        };
+        for (auto& [output, infer_result, timestamp] : Iterate<Result>{pipeline, std::move(pipeline_inputs)}) {
             std::chrono::microseconds dur(timestamp);
             std::chrono::time_point<std::chrono::steady_clock> frame_timestamp(dur);
             output_latency += std::chrono::steady_clock::now() - output_latency_last_frame_appeared_ts;
@@ -270,7 +301,7 @@ int main(int argc, char* argv[]) {
                 //--- Processing keyboard events
                 int key = cv::waitKey(delay);
                 if (27 == key || 'q' == key || 'Q' == key) {  // Esc
-                    keepRunning = false;
+                    break;
                 } else if (32 == key || 'r' == key ||
                             'R' == key) {  // press space or r to restart testing if needed
                     isTestMode = true;
@@ -285,6 +316,9 @@ int main(int argc, char* argv[]) {
                 } else {
                     presenter.handleKey(key);
                 }
+            }
+            if (elapsedSeconds >= std::chrono::seconds(FLAGS_time)) {
+                break;
             }
             output_latency_last_frame_appeared_ts = std::chrono::steady_clock::now();
         }
